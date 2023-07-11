@@ -36,6 +36,26 @@ RVTEST_CODE_BEGIN
 
   # Set SUM=1 so user memory access is permitted
   li TESTNUM, 3
+  # set HADE to 0
+#if __riscv_xlen == 64
+  csrr a1, menvcfg
+  li t0, 1
+  sll t0, t0, 61
+  not t0, t0
+  and a1, a1, t0
+  csrw menvcfg, a1
+#else
+  csrr a1, menvcfgh
+  li t0, 1
+  sll t0, t0, (61 - 32)
+  not t0, t0
+  and a1, a1, t0
+  csrw menvcfgh, a1
+#endif
+
+  # We do this test twice (as 3 and again as 4). For the second run,
+  # we'll have toggled HADE and branch to here:
+1:
   li a1, ((MSTATUS_MPP & ~(MSTATUS_MPP<<1)) * PRV_S) | MSTATUS_SUM
   csrs mstatus, a1
 
@@ -64,8 +84,32 @@ RVTEST_CODE_BEGIN
   li t0, MSTATUS_MPRV
   csrs mstatus, t0
 
+  addi TESTNUM, TESTNUM, 1
+  li t0, 5
+  beq TESTNUM, t0, 1f
+
+  # reset this value:
+  sw zero, dummy - DRAM_BASE, a0
+
+  # set HADE to 1
+#if __riscv_xlen == 64
+  csrr a1, menvcfg
+  li t0, 1
+  sll t0, t0, 61
+  or a1, a1, t0
+  csrw menvcfg, a1
+#else
+  csrr a1, menvcfgh
+  li t0, 1
+  sll t0, t0, (61 - 32)
+  or a1, a1, t0
+  csrw menvcfgh, a1
+#endif
+
+  j 1b
+1:
   # Make sure that superpage entries trap when PPN LSBs are set.
-  li TESTNUM, 4
+  li TESTNUM, 5
   lw a0, page_table_1 - DRAM_BASE
   or a0, a0, 1 << PTE_PPN_SHIFT
   sw a0, page_table_1 - DRAM_BASE, t0
@@ -97,9 +141,21 @@ skip:
   mret
 
 1:
-  li t1, 3
-  bne TESTNUM, t1, 1f
+  li t1, 4
+  bgt TESTNUM, t1, 1f
   # The implementation doesn't appear to set D bits in HW.
+  # Verify that HADE is 0.
+#if __riscv_xlen == 64
+  csrr a1, menvcfg
+  srli a1, a1, 62
+  andi a1, a1, 1
+  bnez a1, die
+#else
+  csrr a1, menvcfgh
+  srli a1, a1, (62 - 32)
+  andi a1, a1, 1
+  bnez a1, die
+#endif
   # Make sure the D bit really is clear.
   lw t0, page_table_1
   and t1, t0, PTE_D
@@ -111,7 +167,7 @@ skip:
   mret
 
 1:
-  li t1, 4
+  li t1, 5
   bne TESTNUM, t1, 1f
   j pass
 
