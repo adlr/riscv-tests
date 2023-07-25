@@ -106,13 +106,17 @@ RVTEST_CODE_BEGIN
   li t1, 15
   bne t0, t1, die
 
-  # TODO: store cause access fault
-  # TODO: ssload/sspopchk/sspush/ssamoswap should cause access fault if done to non SS page
-  
+  # Store to SS page should cause access fault
+	li t4, CAUSE_STORE_ACCESS  # Set expected fault
+  sw t0, dummy - DRAM_BASE, a0
+	bnez t4, die  # should be cleared to 0 by handler
+	
   # Leave MPRV
   li t0, MSTATUS_MPRV
   csrc mstatus, t0
 	
+  # ssload/sspopchk/sspush/ssamoswap should cause access fault if done to non SS page
+  
   # Set PTE as non-SS
   lw t0, page_table_1
   ori t0, t0, (PTE_R | PTE_X)
@@ -127,6 +131,18 @@ RVTEST_CODE_BEGIN
   csrw CSR_SSP, t0
 	li t4, CAUSE_LOAD_ACCESS  # Set expected fault
   SSLOAD_T0
+	bnez t4, die  # should be cleared to 0 by handler
+
+	li t4, CAUSE_STORE_ACCESS  # Set expected fault
+  SSPUSH_T0
+	bnez t4, die  # should be cleared to 0 by handler
+
+	li t4, CAUSE_LOAD_ACCESS  # Set expected fault
+	SSPOPCHK_T0
+	bnez t4, die  # should be cleared to 0 by handler
+
+	li t4, CAUSE_STORE_ACCESS  # Set expected fault
+  SSAMOSWAP(REG_T0, REG_T2, REG_T1)
 	bnez t4, die  # should be cleared to 0 by handler
 
 ;;   # Try a faulting store to make sure dirty bit is not set
