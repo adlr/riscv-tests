@@ -30,8 +30,8 @@
 #define SSPUSH_T0   SSPUSH_X5
 #define SSAMOSWAP(rd, rs1, rs2) \
   .word (0b10000010000000000100000001110011 | \
-	(rs2 << 20) | (rs1 << 15 ) | (rd << 7) \
-  )
+         (rs2 << 20) | (rs1 << 15 ) | (rd << 7) \
+        )
 
 #define CSR_SSP 0x50
 
@@ -50,10 +50,10 @@ RVTEST_CODE_BEGIN
   li a1, ((MSTATUS_MPP & ~(MSTATUS_MPP<<1)) * PRV_S) | MSTATUS_MPRV
   csrs mstatus, a1
 
-	# start CFI testing here
+  # start CFI testing here
   li a1, ((MSTATUS_MPP & ~(MSTATUS_MPP<<1)) * PRV_S) | MSTATUS_SUM
   csrs mstatus, a1
-	
+  
   # Setup a PTE entry as SS i.e. xwr=010, ssload/sspopchk/sspush/ssamoswap should success to that page
   
   # Store value in entry
@@ -63,35 +63,43 @@ RVTEST_CODE_BEGIN
   # Leave MPRV
   li t0, MSTATUS_MPRV
   csrc mstatus, t0
-	
+  
   # Set PTE as SS
   lw t0, page_table_1
-  ori t0, t0, ~(PTE_R | PTE_X)
+  andi t0, t0, ~(PTE_R | PTE_X)
   sw t0, page_table_1, a0
+  sfence.vma
 
+#if __riscv_xlen == 64
+  li t0, MENVCFG_CFIE
+  csrs menvcfg, t0
+#else
+  li t0, MENVCFGH_CFIE
+  csrs menvcfgh, t0
+#endif
+	
   # Set ssp
   la t0, dummy - DRAM_BASE
   csrw CSR_SSP, t0
 
-	# TODO: enable CFI
   # Enter MPRV again
   li t0, MSTATUS_MPRV
   csrs mstatus, t0
 
   # read from ssp
-	SSLOAD_T0
+  SSLOAD_T0
   li t1, 13
   bne t0, t1, die
 
-	SSPOPCHK_T0
+  SSPOPCHK_T0
   li t0, 14
-	SSPUSH_T0
-	
-	lw t1, dummy - DRAM_BASE
+  SSPUSH_T0
+  
+  lw t1, dummy - DRAM_BASE
   bne t0, t1, die
   li t1, 15
-	la t2, dummy - DRAM_BASE
-	SSAMOSWAP(REG_T0, REG_T2, REG_T1)
+  la t2, dummy - DRAM_BASE
+  SSAMOSWAP(REG_T0, REG_T2, REG_T1)
   li t1, 14
   bne t0, t1, die
   lw t0, dummy - DRAM_BASE
@@ -101,9 +109,25 @@ RVTEST_CODE_BEGIN
   # TODO: store cause access fault
   # TODO: ssload/sspopchk/sspush/ssamoswap should cause access fault if done to non SS page
   
-
-
-
+  # Leave MPRV
+  li t0, MSTATUS_MPRV
+  csrc mstatus, t0
+	
+  # Set PTE as non-SS
+  lw t0, page_table_1
+  ori t0, t0, (PTE_R | PTE_X)
+  sw t0, page_table_1, a0
+  sfence.vma
+	
+  # Enter MPRV again
+  li t0, MSTATUS_MPRV
+  csrs mstatus, t0
+	
+  la t0, dummy - DRAM_BASE
+  csrw CSR_SSP, t0
+	li t4, CAUSE_LOAD_ACCESS  # Set expected fault
+  SSLOAD_T0
+	bnez t4, die  # should be cleared to 0 by handler
 
 ;;   # Try a faulting store to make sure dirty bit is not set
 ;;   li TESTNUM, 2
@@ -201,6 +225,11 @@ RVTEST_CODE_BEGIN
   .global mtvec_handler
 mtvec_handler:
   csrr t0, mcause
+	sub t0, t0, t4
+  bnez t0, die   # Got unexpected fault
+  li t4, 0   # Zero-out to show we handled the fault
+  j skip  # skip over this instruction and continue
+
   add t0, t0, -CAUSE_STORE_PAGE_FAULT
   bnez t0, die
 
@@ -257,6 +286,8 @@ RVTEST_CODE_END
 RVTEST_DATA_BEGIN
 
   TEST_DATA
+.align 12
+non_ss: .dword 0x21
 
 .align 12
 page_table_1: .dword (DRAM_BASE/RISCV_PGSIZE << PTE_PPN_SHIFT) | PTE_V | PTE_U | PTE_R | PTE_W | PTE_X | PTE_A
