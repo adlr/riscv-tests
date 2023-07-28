@@ -145,6 +145,36 @@ RVTEST_CODE_BEGIN
   SSAMOSWAP(REG_T0, REG_T2, REG_T1)
 	bnez t4, die  # should be cleared to 0 by handler
 
+  # Leave MPRV
+  li t0, MSTATUS_MPRV
+  csrc mstatus, t0
+	
+	# Set PTE as SS
+  lw t0, page_table_1
+  andi t0, t0, ~(PTE_R | PTE_X)
+  sw t0, page_table_1, a0
+  sfence.vma
+
+	# Set up PMP with R+W permission
+  la t0, dummy
+  csrw pmpaddr0, t0
+	li t0, (PMP_L | PMP_NA4 | PMP_X | PMP_W | PMP_R)
+  csrs pmpcfg0, t0
+
+  # Enter MPRV again
+  li t0, MSTATUS_MPRV
+  csrs mstatus, t0
+	
+	# ssload/sspopchk requrie read permission in PMP
+	SSLOAD_T0  # should succeed
+  # no read, expect to fail
+  csrci pmpcfg0, PMP_R
+	li t4, CAUSE_LOAD_ACCESS  # set expected failure
+  SSLOAD_T0
+  bnez t4, die
+	
+  # sspush/ssamoswap require write permission in PMP
+
 ;;   # Try a faulting store to make sure dirty bit is not set
 ;;   li TESTNUM, 2
 ;;   li t2, 1
